@@ -1,0 +1,14 @@
+aws_region    = "eu-west-1"
+project_name  = "sitetakip"
+environment   = "prod"
+
+db_username = "sitetakip"
+db_password = "CHANGE-THIS-STRONG-PASSWORD"
+jwt_secret  = "CHANGE-THIS-RANDOM-SECRET"
+
+cors_origin = "https://sitetakip.vercel.app"
+
+# Cost optimization
+db_instance_class = "db.t4g.micro"
+backend_cpu       = 256
+backend_memory    = 512
