@@ -158,8 +158,17 @@ resource "aws_security_group" "ecs" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
+    description     = "Backend API"
     from_port       = 8080
     to_port         = 8080
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  ingress {
+    description     = "Metabase"
+    from_port       = 3000
+    to_port         = 3000
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
