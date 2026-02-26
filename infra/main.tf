@@ -288,6 +288,61 @@ resource "aws_lb_listener" "http" {
   }
 }
 
+# ─── ACM + HTTPS ─────────────────────────────────────
+
+resource "aws_acm_certificate" "staging_api" {
+  domain_name       = "staging-api.site-takip.com"
+  validation_method = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = { Name = "${var.project_name}-staging-api-cert" }
+}
+
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = "arn:aws:acm:eu-central-1:034362052544:certificate/bb18af7f-04e2-49eb-ae6e-3aa0b75a47bb"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend.arn
+  }
+}
+
+resource "aws_acm_certificate_validation" "staging_api" {
+  certificate_arn = aws_acm_certificate.staging_api.arn
+
+  timeouts {
+    create = "10m"
+  }
+}
+
+resource "aws_lb_listener_certificate" "staging_api" {
+  listener_arn    = aws_lb_listener.https.arn
+  certificate_arn = aws_acm_certificate_validation.staging_api.certificate_arn
+}
+
+resource "aws_lb_listener_rule" "staging_https" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 20
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend_staging.arn
+  }
+
+  condition {
+    host_header {
+      values = ["staging-api.site-takip.com"]
+    }
+  }
+}
+
 # ─── ECS ──────────────────────────────────────────────
 
 resource "aws_ecs_cluster" "main" {
