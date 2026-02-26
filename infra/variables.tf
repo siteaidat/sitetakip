@@ -53,3 +53,13 @@ variable "cors_origin" {
   description = "CORS allowed origin (Vercel URL)"
   default     = "https://sitetakip.vercel.app"
 }
+
+variable "db_password_staging" {
+  description = "RDS master password for staging"
+  sensitive   = true
+}
+
+variable "cors_origin_staging" {
+  description = "CORS allowed origin for staging frontend"
+  default     = "https://staging.sitetakip.vercel.app"
+}

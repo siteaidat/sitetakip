@@ -8,6 +8,10 @@ jwt_secret  = "CHANGE-THIS-RANDOM-SECRET"
 
 cors_origin = "https://sitetakip.vercel.app"
 
+# Staging
+db_password_staging = "CHANGE-THIS-STAGING-PASSWORD"
+cors_origin_staging = "https://staging.sitetakip.vercel.app"
+
 # Cost optimization
 db_instance_class = "db.t4g.micro"
 backend_cpu       = 256

@@ -27,3 +27,20 @@ output "cloudwatch_log_group" {
   description = "CloudWatch log group for ECS"
   value       = aws_cloudwatch_log_group.ecs.name
 }
+
+# ─── STAGING OUTPUTS ────────────────────────────────
+
+output "rds_staging_endpoint" {
+  description = "RDS staging endpoint"
+  value       = aws_db_instance.staging.endpoint
+}
+
+output "ecs_staging_service_name" {
+  description = "ECS staging service name"
+  value       = aws_ecs_service.backend_staging.name
+}
+
+output "dbsync_ecr_repository_url" {
+  description = "ECR repository URL for dbsync image"
+  value       = aws_ecr_repository.dbsync.repository_url
+}

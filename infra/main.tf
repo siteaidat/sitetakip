@@ -377,3 +377,337 @@ resource "aws_ecs_service" "backend" {
 
   depends_on = [aws_lb_listener.http]
 }
+
+# ═══════════════════════════════════════════════════════
+# STAGING ENVIRONMENT
+# ═══════════════════════════════════════════════════════
+
+# ─── STAGING RDS ─────────────────────────────────────
+
+resource "aws_db_instance" "staging" {
+  identifier     = "${var.project_name}-db-staging"
+  engine         = "postgres"
+  engine_version = "16.12"
+  instance_class = "db.t4g.micro"
+
+  allocated_storage     = 20
+  max_allocated_storage = 30
+  storage_encrypted     = true
+
+  db_name  = "sitetakip"
+  username = var.db_username
+  password = var.db_password_staging
+
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+
+  backup_retention_period = 1
+  skip_final_snapshot     = true
+  multi_az                = false
+
+  tags = { Name = "${var.project_name}-db-staging" }
+}
+
+# ─── STAGING ECS ─────────────────────────────────────
+
+resource "aws_cloudwatch_log_group" "ecs_staging" {
+  name              = "/ecs/${var.project_name}-staging"
+  retention_in_days = 14
+}
+
+resource "aws_ecs_task_definition" "backend_staging" {
+  family                   = "${var.project_name}-backend-staging"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = var.backend_cpu
+  memory                   = var.backend_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+
+  container_definitions = jsonencode([{
+    name  = "backend"
+    image = "${aws_ecr_repository.backend.repository_url}:${var.backend_image_tag}"
+
+    portMappings = [{
+      containerPort = 8080
+      protocol      = "tcp"
+    }]
+
+    environment = [
+      { name = "PORT", value = "8080" },
+      { name = "DATABASE_URL", value = "postgres://${var.db_username}:${var.db_password_staging}@${aws_db_instance.staging.endpoint}/sitetakip?sslmode=require" },
+      { name = "JWT_SECRET", value = var.jwt_secret },
+      { name = "CORS_ORIGIN", value = var.cors_origin_staging },
+    ]
+
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.ecs_staging.name
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "backend"
+      }
+    }
+  }])
+}
+
+resource "aws_lb_target_group" "backend_staging" {
+  name        = "${var.project_name}-staging-tg"
+  port        = 8080
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    path                = "/health"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    interval            = 30
+    timeout             = 5
+  }
+}
+
+resource "aws_ecs_service" "backend_staging" {
+  name            = "${var.project_name}-backend-staging"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.backend_staging.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.backend_staging.arn
+    container_name   = "backend"
+    container_port   = 8080
+  }
+
+  depends_on = [aws_lb_listener.http]
+}
+
+# ─── ALB HOST-BASED ROUTING ─────────────────────────
+
+resource "aws_lb_listener_rule" "staging" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend_staging.arn
+  }
+
+  condition {
+    host_header {
+      values = ["staging-api.site-takip.com"]
+    }
+  }
+}
+
+# ─── S3 BUCKET FOR DB DUMPS ─────────────────────────
+
+resource "aws_s3_bucket" "db_dumps" {
+  bucket = "${var.project_name}-db-dumps"
+
+  tags = { Name = "${var.project_name}-db-dumps" }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "db_dumps" {
+  bucket = aws_s3_bucket.db_dumps.id
+
+  rule {
+    id     = "expire-old-dumps"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 7
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "db_dumps" {
+  bucket = aws_s3_bucket.db_dumps.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# ─── DAILY DB SYNC (EventBridge + ECS Scheduled Task) ─
+
+resource "aws_ecr_repository" "dbsync" {
+  name                 = "${var.project_name}-dbsync"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = false
+  }
+}
+
+resource "aws_security_group" "dbsync" {
+  name_prefix = "${var.project_name}-dbsync-"
+  vpc_id      = aws_vpc.main.id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${var.project_name}-dbsync-sg" }
+}
+
+# Allow dbsync task to connect to RDS (both prod and staging)
+resource "aws_security_group_rule" "rds_from_dbsync" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.dbsync.id
+  security_group_id        = aws_security_group.rds.id
+}
+
+# IAM role for dbsync task
+resource "aws_iam_role" "dbsync_task" {
+  name = "${var.project_name}-dbsync-task"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "dbsync_s3" {
+  name = "${var.project_name}-dbsync-s3"
+  role = aws_iam_role.dbsync_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ]
+      Resource = "${aws_s3_bucket.db_dumps.arn}/*"
+    }]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "dbsync" {
+  name              = "/ecs/${var.project_name}-dbsync"
+  retention_in_days = 14
+}
+
+resource "aws_ecs_task_definition" "dbsync" {
+  family                   = "${var.project_name}-dbsync"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = 256
+  memory                   = 512
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  task_role_arn            = aws_iam_role.dbsync_task.arn
+
+  container_definitions = jsonencode([{
+    name  = "dbsync"
+    image = "${aws_ecr_repository.dbsync.repository_url}:latest"
+
+    environment = [
+      { name = "PROD_DB_HOST", value = aws_db_instance.main.address },
+      { name = "PROD_DB_PORT", value = "5432" },
+      { name = "PROD_DB_NAME", value = "sitetakip" },
+      { name = "PROD_DB_USER", value = var.db_username },
+      { name = "PROD_DB_PASS", value = var.db_password },
+      { name = "STAGING_DB_HOST", value = aws_db_instance.staging.address },
+      { name = "STAGING_DB_PORT", value = "5432" },
+      { name = "STAGING_DB_NAME", value = "sitetakip" },
+      { name = "STAGING_DB_USER", value = var.db_username },
+      { name = "STAGING_DB_PASS", value = var.db_password_staging },
+      { name = "S3_BUCKET", value = aws_s3_bucket.db_dumps.id },
+      { name = "AWS_DEFAULT_REGION", value = var.aws_region },
+    ]
+
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.dbsync.name
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "dbsync"
+      }
+    }
+  }])
+}
+
+# EventBridge rule: daily at UTC 22:00 (TR 01:00)
+resource "aws_cloudwatch_event_rule" "dbsync_schedule" {
+  name                = "${var.project_name}-dbsync-daily"
+  description         = "Daily prod→staging DB sync at TR 01:00"
+  schedule_expression = "cron(0 22 * * ? *)"
+}
+
+# IAM role for EventBridge to run ECS tasks
+resource "aws_iam_role" "eventbridge_ecs" {
+  name = "${var.project_name}-eventbridge-ecs"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "events.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "eventbridge_run_task" {
+  name = "${var.project_name}-eventbridge-run-task"
+  role = aws_iam_role.eventbridge_ecs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ecs:RunTask"
+        Resource = aws_ecs_task_definition.dbsync.arn
+      },
+      {
+        Effect = "Allow"
+        Action = "iam:PassRole"
+        Resource = [
+          aws_iam_role.ecs_task_execution.arn,
+          aws_iam_role.dbsync_task.arn,
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_cloudwatch_event_target" "dbsync_ecs" {
+  rule      = aws_cloudwatch_event_rule.dbsync_schedule.name
+  target_id = "${var.project_name}-dbsync"
+  arn       = aws_ecs_cluster.main.arn
+  role_arn  = aws_iam_role.eventbridge_ecs.arn
+
+  ecs_target {
+    task_count          = 1
+    task_definition_arn = aws_ecs_task_definition.dbsync.arn
+    launch_type         = "FARGATE"
+
+    network_configuration {
+      subnets         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+      security_groups = [aws_security_group.dbsync.id]
+    }
+  }
+}
