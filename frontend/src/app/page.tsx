@@ -5,6 +5,115 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth";
 import Link from "next/link";
 
+const IS_COMING_SOON = process.env.NEXT_PUBLIC_COMING_SOON === "true";
+
+/* ───────────────────────── Coming Soon ───────────────────────── */
+function ComingSoon() {
+  const TARGET = new Date("2026-05-01T00:00:00+03:00").getTime();
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    function calc() {
+      const diff = Math.max(0, TARGET - Date.now());
+      return {
+        days: Math.floor(diff / (1000 * 60 * 60 * 24)),
+        hours: Math.floor((diff / (1000 * 60 * 60)) % 24),
+        minutes: Math.floor((diff / (1000 * 60)) % 60),
+        seconds: Math.floor((diff / 1000) % 60),
+      };
+    }
+    setTimeLeft(calc());
+    const id = setInterval(() => setTimeLeft(calc()), 1000);
+    return () => clearInterval(id);
+  }, [TARGET]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (email.trim()) setSubmitted(true);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex flex-col items-center justify-center px-6 relative overflow-hidden">
+      {/* Background decoration */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl" />
+      </div>
+
+      <div className="relative z-10 text-center max-w-2xl mx-auto">
+        {/* Brand */}
+        <div className="animate-fade-in-up">
+          <span className="text-2xl font-bold text-white tracking-tight">SiteTakip</span>
+        </div>
+
+        {/* Heading */}
+        <h1 className="mt-8 text-4xl sm:text-5xl md:text-6xl font-bold text-white tracking-tight leading-tight animate-fade-in-up-delay-1">
+          Yakında Hizmetinizdeyiz
+        </h1>
+        <p className="mt-6 text-lg text-slate-400 max-w-lg mx-auto leading-relaxed animate-fade-in-up-delay-2">
+          Site yönetimini kolaylaştıran platformumuz üzerinde çalışıyoruz.
+          Aidat takibi, gider yönetimi ve raporlama — hepsi tek yerde.
+        </p>
+
+        {/* Countdown */}
+        <div className="mt-12 flex items-center justify-center gap-3 sm:gap-5 animate-fade-in-up-delay-3">
+          {([
+            ["days", "Gün"],
+            ["hours", "Saat"],
+            ["minutes", "Dakika"],
+            ["seconds", "Saniye"],
+          ] as const).map(([key, label]) => (
+            <div key={key} className="flex flex-col items-center">
+              <div className="countdown-box w-16 h-16 sm:w-20 sm:h-20 bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl flex items-center justify-center">
+                <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums">
+                  {String(timeLeft[key]).padStart(2, "0")}
+                </span>
+              </div>
+              <span className="mt-2 text-xs text-slate-500 uppercase tracking-wider">{label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Email form */}
+        <div className="mt-12 animate-fade-in-up-delay-3">
+          {submitted ? (
+            <div className="inline-flex items-center gap-2 text-green-400 bg-green-400/10 border border-green-400/20 rounded-xl px-6 py-3">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+              <span className="text-sm font-medium">Kaydınız alındı! Lansman günü sizi bilgilendireceğiz.</span>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row items-center gap-3 max-w-md mx-auto">
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="E-posta adresiniz"
+                className="w-full sm:flex-1 bg-white/5 border border-white/10 text-white placeholder-slate-500 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+              />
+              <button
+                type="submit"
+                className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl px-6 py-3 text-sm transition-colors whitespace-nowrap"
+              >
+                Beni Haberdar Et
+              </button>
+            </form>
+          )}
+        </div>
+
+        {/* Footer hint */}
+        <p className="mt-16 text-xs text-slate-600 animate-fade-in-up-delay-3">
+          &copy; {new Date().getFullYear()} SiteTakip
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* ───────────────────────────── FAQ Data ───────────────────────────── */
 const faqs = [
   {
@@ -31,6 +140,12 @@ const faqs = [
 
 /* ───────────────────────────── Page ───────────────────────────── */
 export default function Home() {
+  if (IS_COMING_SOON) return <ComingSoon />;
+
+  return <LandingPage />;
+}
+
+function LandingPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

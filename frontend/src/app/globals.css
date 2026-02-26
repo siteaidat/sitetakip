@@ -51,3 +51,13 @@ body {
   animation: fade-in-up 0.6s ease-out 0.3s forwards;
   opacity: 0;
 }
+
+/* Countdown box subtle pulse */
+@keyframes countdown-pulse {
+  0%, 100% { border-color: rgba(255, 255, 255, 0.1); }
+  50% { border-color: rgba(59, 130, 246, 0.3); }
+}
+
+.countdown-box {
+  animation: countdown-pulse 4s ease-in-out infinite;
+}
