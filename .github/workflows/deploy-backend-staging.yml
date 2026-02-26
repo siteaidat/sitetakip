@@ -1,6 +1,7 @@
-name: Deploy Backend
+name: Deploy Backend Staging
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -11,17 +12,17 @@ on:
       - "Dockerfile"
       - "go.mod"
       - "go.sum"
-      - ".github/workflows/deploy.yml"
+      - ".github/workflows/deploy-backend-staging.yml"
 
 env:
   AWS_REGION: eu-central-1
   ECR_REPOSITORY: sitetakip-backend
   ECS_CLUSTER: sitetakip-cluster
-  ECS_SERVICE: sitetakip-backend
+  ECS_SERVICE: sitetakip-backend-staging
 
 jobs:
   deploy:
-    name: Build & Deploy
+    name: Build & Deploy to Staging
     runs-on: ubuntu-latest
 
     permissions:
@@ -71,5 +72,5 @@ jobs:
 
       - name: Verify deployment
         run: |
-          echo "Deployment completed successfully"
+          echo "Staging deployment completed successfully"
           echo "Image: ${{ steps.build-image.outputs.image }}"
